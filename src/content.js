@@ -1,5 +1,7 @@
 const FreePuzzle_API_URL = "https://edpuzzle.com/api/v3/";
 
+let FreePuzzle_Worker = null;
+
 /* Multiple Choice Question Structure */
 /*
 {
@@ -171,10 +173,16 @@ async function FreePuzzle_ProccessQuestions(assignemntJSON, mediaJSON){
     for (let i = 0; i < questions.length; i++) {
         if (questions[i].type === "open-ended") {
             const openEndedRes = await FreePuzzle_GetOpenEndedResponse(assignemntJSON.medias[0].title, (mediaJSON.source === "youtube" ? `https://www.youtube.com/watch/${mediaJSON.videoId}` : "unkown"), questions[i]);
-            proccessedQuestions[`${questions[i].body[0].html.replace(htmlRegexG, "").replace(htmlRegexGCode, "")}`] = openEndedRes;
+            proccessedQuestions[`${questions[i].body[0].html.replace(htmlRegexG, "").replace(htmlRegexGCode, "")}`] = {
+                type: questions[i].type,
+                answers: openEndedRes
+            };
         }else if(questions[i].type.includes("choice") || questions[i].choices !== undefined){
             const answers = await FreePuzzle_GetChoiceAnswers(questions[i]);
-            proccessedQuestions[`${questions[i].body[0].html.replace(htmlRegexG, "").replace(htmlRegexGCode, "")}`] = answers;
+            proccessedQuestions[`${questions[i].body[0].html.replace(htmlRegexG, "").replace(htmlRegexGCode, "")}`] = {
+                type: questions[i].type,
+                answers: answers
+            };
         }
     }
 
@@ -187,17 +195,55 @@ function FreePuzzle_IsQuestionAsked(){
 }
 
 /* returns a html element | ... */
-function FreePuzzle_GetMultipleChoiceChoicesHTML(sAnswer){
+function FreePuzzle_GetMultipleChoicesChoiceHTML(sAnswer){
     const ul = document.getElementsByClassName("S22KF9HiqC")[0];
-    if(sAnswer === undefined)
-        return ul;
     let choiceHTML = null;
-    ul.children.forEach((e)=>{
+    for(let i = 0; i < ul.children.length; i++){
+        const e = ul.children[i];
         const c = (e.getElementsByClassName("kvVVRmoyRB NVoSF83SAC hsU0UJ0TaS duNyBf_CZP QIUj5uyqT_ _8iDl0vnnei")[0]);
+        const d = (e.getElementsByClassName("_AnLKA_ZU9")[0]);
         if(c.innerText == sAnswer)
-            choiceHTML = c;
-    });
+            choiceHTML = {
+                checkbox: d,
+                span: c
+            };
+    }
     return choiceHTML;
+}
+
+/* a handle under FreePuzzle_Worker (interval), executes every 50ms */
+async function FreePuzzle_WorkerHandle(assignemntJSON, mediaJSON, proccessedQuestions){
+    const htmlRegexG = /<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>/g;
+    const htmlRegexGCode = /&[a-zA-Z0-9#]+;/g;
+
+    if(!FreePuzzle_IsQuestionAsked())
+        return;
+    const questionDiv = document.getElementsByClassName("pmbdsU36dw")[0];
+    const sQuestion = questionDiv.innerText;
+
+    const qQuestion = proccessedQuestions[sQuestion];
+    console.log(sQuestion);
+    console.log(proccessedQuestions);
+
+    if(qQuestion == undefined)
+        return;
+
+    if(qQuestion.type !== "open-ended")
+    {
+        for(let i = 0; i < qQuestion.answers.length; i++)
+        {
+            const answer = qQuestion.answers[i];
+            const element = FreePuzzle_GetMultipleChoicesChoiceHTML(answer.body[0].html.replace(htmlRegexG, "").replace(htmlRegexGCode, ""));
+            if(element !== undefined){
+                element.checkbox.parentElement.parentElement.parentElement.style.backgroundColor = "#00FF00";
+                // click it somehow
+            }else{
+
+            }
+        }
+    }else if(qQuestion.type === "open-ended"){
+        
+    }
 }
 
 /* this will get everything about the current assignnment */
@@ -211,7 +257,7 @@ async function FreePuzzle_Initialize() {
 
     const proccessedQuestions = await FreePuzzle_ProccessQuestions(assignemntJSON, mediaJSON);
 
-    
+    FreePuzzle_Worker = setInterval(FreePuzzle_WorkerHandle, 50, assignemntJSON, mediaJSON, proccessedQuestions);
 }
 
 FreePuzzle_Initialize();
