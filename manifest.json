@@ -1,0 +1,27 @@
+{
+    "manifest_version": 3,
+    "name": "FreePuzzle",
+    "description": "EdPuzzle Assistant",
+    "version": "1.0",
+    "permissions": [
+        "tabs",
+        "activeTab"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "<all_urls>"
+            ],
+            "js": [
+                "src/content.js"
+            ]
+        }
+    ],
+    "background": {
+        "service_worker": "src/service-worker.js",
+        "type": "module"
+    },
+    "action": {
+        "default_popup": "src/action/index.html"
+    }
+}
