@@ -10,9 +10,7 @@
     ],
     "host_permissions": [
         "http://*/*",
-        "https://*/*",
-        "storage",
-        "cookies"
+        "https://*/*"
     ],
     "content_scripts": [
         {
