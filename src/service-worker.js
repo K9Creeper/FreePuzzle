@@ -1,3 +1,5 @@
+/// Ts kinda like handles the chrome cookies n shtuff;
+
 let savedCookies = [];
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -26,21 +28,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         return true;
     } else if (request.action === "saveCookiesCheckpoint") {
-        // Save the current cookies for the specified domain (e.g., 'edpuzzle.com')
         chrome.cookies.getAll({ domain: 'edpuzzle.com' }, function (cookies) {
-            savedCookies = cookies;  // Save cookies to the checkpoint
+            savedCookies = cookies;
             sendResponse({ success: true, message: "Cookies saved successfully." });
         });
-        return true; // Keep the message channel open until cookies are saved
+        return true;
     }
     else if (request.action === "restoreCookiesCheckpoint") {
         // Restore the saved cookies
         if (savedCookies.length === 0) {
             sendResponse({ success: false, error: "No saved cookies checkpoint found." });
-            return true; // Keep the message channel open for response
+            return true;
         }
 
-        // Loop through the saved cookies and set them back
         let restorePromises = savedCookies.map(cookie => {
             return new Promise((resolve, reject) => {
                 const cookieDetails = {
@@ -67,7 +67,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
         });
 
-        // Wait for all cookies to be restored
         Promise.all(restorePromises)
             .then(() => {
                 sendResponse({ success: true, message: "Cookies restored successfully." });
@@ -76,6 +75,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ success: false, error: error.message });
             });
 
-        return true; // Keep the message channel open for response
+        return true;
     }
 });
