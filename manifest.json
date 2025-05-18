@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "FreePuzzle",
-    "description": "EdPuzzle Assistant",
+    "description": "An EdPuzzle Assistant",
     "version": "1.0",
     "permissions": [
         "cookies",
