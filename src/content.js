@@ -12,7 +12,7 @@ const FreePuzzle_ASCII = `
 `;
 
 const FreePuzzle_TeacherEmail = "email@deez.com";
-const FreePuzzle_TeacherPassword = "pazzword1234";
+const FreePuzzle_TeacherPassword = "passondeez";
 
 let FreePuzzle_worker = null;
 let FreePuzzle_loaderWorker = null;
@@ -297,7 +297,7 @@ async function FreePuzzle_TeacherLogin(username, password) {
 
     console.log('Logged in as teacher!');
 
-    if (!Authorization.startsWith('ey')) {
+    if (!auth.startsWith('ey')) {
         console.error('This authorization token does not appear to be valid.');
     } else {
         console.log('Authorization token is valid.');
