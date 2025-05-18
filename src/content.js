@@ -1,6 +1,21 @@
 const FreePuzzle_API_URL = "https://edpuzzle.com/api/v3/";
 
-let FreePuzzle_Worker = null;
+const FreePuzzle_ASCII = `
+ __                                      _      
+/ _|                                    | |     
+| |_ _ __ ___  ___   _ __  _   _ _______| | ___ 
+|  _| '__/ _ \\/ _ \\ | '_ \\| | | |_  /_  / |/ _ \\
+| | | | |  __/  __/ | |_) | |_| |/ / / /| |  __/
+|_| |_|  \\___|\\___| | .__/ \\__,_/___/___|_|\\___|
+                    | |                         
+                    |_|                                               
+`;
+
+const FreePuzzle_TeacherEmail = "email@deez.com";
+const FreePuzzle_TeacherPassword = "pazzword1234";
+
+let FreePuzzle_worker = null;
+let FreePuzzle_loaderWorker = null;
 
 /* Multiple Choice Question Structure */
 /*
@@ -45,6 +60,22 @@ let FreePuzzle_Worker = null;
 }
 */
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function FreePuzzle_SendMessagePromise(message) {
+    return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(message, (response) => {
+            if (chrome.runtime.lastError) {
+                reject(chrome.runtime.lastError); // Reject if an error occurred
+            } else {
+                resolve(response); // Resolve with the response
+            }
+        });
+    });
+}
+
 /* returns a string | it is the assignment id based off of the current page */
 function FreePuzzle_GetAssignementId() {
     const path = window.location.pathname;
@@ -57,8 +88,8 @@ function FreePuzzle_GetAssignementIdUrl(sAssignmentId) {
 }
 
 /* returns a string | it is a edpuzzle api url */
-function FreePuzzle_GetMediaUrl(sContentId) {
-    return `${FreePuzzle_API_URL}media/${sContentId}`;
+function FreePuzzle_GetMediaUrl(contentId) {
+    return `${FreePuzzle_API_URL}media/${contentId}`;
 }
 
 /* returns a boolean | based whether the user is in the correct domain */
@@ -66,6 +97,24 @@ function FreePuzzle_InCorrectDir() {
     return (window.location.hostname.includes('edpuzzle.com') &&
         window.location.pathname.includes("/watch") &&
         window.location.pathname.includes("/assignments/"));
+}
+
+/* returns a html element | gets the viewport of the MAIN edpuzzle thing */
+function FreePuzzle_GetEdPuzzleVP() {
+    return document.querySelector("body > div > div > div > div > div > main > div > div > div > div > div").children[1];
+}
+
+/* returns list of html elements | gets info */
+function FreePuzzle_GetQuestionVP() {
+    const half = FreePuzzle_GetEdPuzzleVP().children[1].children[1].children[0];
+    const lis = half.children[half.children.length - 1].children;
+    for (let i = 0; i < lis.length; i++) {
+        const li = lis[i];
+        if (li.className.includes("LD3oggZGVU")) {
+            return li.querySelector("div > div > article");
+        }
+    }
+    return undefined;
 }
 
 /* returns a array of choice structures | takes in a question structure */
@@ -83,9 +132,11 @@ function FreePuzzle_GetChoiceAnswers(jQuestion) {
 /* returns a string | takes in a question structure, and returns a possible answer */
 async function FreePuzzle_GetOpenEndedResponse(sTitle, videoLink, jQuestion) {
     const idealAnswer = jQuestion.idealAnswer;
-    if (idealAnswer !== undefined) {
+
+    if (idealAnswer !== undefined && idealAnswer.length > 0) {
         return idealAnswer;
     }
+
     const htmlRegexG = /<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>/g;
     let prompt = "";
     jQuestion.body.forEach((e) => {
@@ -101,7 +152,26 @@ async function FreePuzzle_GetOpenEndedResponse(sTitle, videoLink, jQuestion) {
         contents: [
             {
                 "parts": [
-                    { "text": `The student just watched a video based on the title '${sTitle}', the video link is: ${videoLink}. Please answer the prompt: ${prompt}. DO NOT respond with anything other than the answer, do a minimal response and not include anything extra. If the video link is unkown or cannot be accessed just go off of context from the title; DO NOT SAY YOU NEED MORE INFORMATION, CONTEXT, OR THAT YOU NEED TO SEE THE VIDEO TO ANSWER THE QUESTION.` }
+                    {
+                        "text": `
+                            **Scenario:** A student has watched a video titled '${sTitle}'. 
+                            **Video Link:** ${videoLink} 
+                            **Prompt:** ${prompt}
+
+                            **Instructions:**
+                            1. **Answer the prompt directly.** 
+                            2. **Keep your response concise and to the point.** 
+                            3. **If the 'videoLink' is invalid or inaccessible:**
+                            
+                            * **Base your answer solely on the provided 'sTitle'.**
+                            * **If insufficient information is available from either 'sTitle' or 'prompt', respond with '~~NONE~~'.**
+
+                            **Important:** 
+                            * **Do NOT:**
+                            * Indicate any need for additional information.
+                            * Include any extraneous information in your response.
+                        `
+                    }
                 ]
             }
         ]
@@ -121,7 +191,7 @@ async function FreePuzzle_GetOpenEndedResponse(sTitle, videoLink, jQuestion) {
         strResponse = json.candidates[0].content.parts[0].text;
     });
 
-    return strResponse;
+    return (strResponse.includes("~~NONE~~") ? "" : strResponse);
 }
 
 /* returns a json structure | takes in an assignment id */
@@ -140,29 +210,101 @@ async function FreePuzzle_GetAssigmentJSON(sAssignmentId) {
     return JSON;
 }
 
-/* returns a json structure | takes in an content id */
-async function FreePuzzle_GetMediaJSON(sContentId) {
+/* returns a json structure | takes in an id */
+async function FreePuzzle_GetMediaJSON(contentId) {
     /* the url to fetch */
-    const mediaUrl = FreePuzzle_GetMediaUrl(sContentId);
+    const mediaUrl = FreePuzzle_GetMediaUrl(contentId);
 
     /* pre-define a holder for the json */
-    let JSON = null;
+    let data = null;
 
     /* await so the pre-define is set & fetch */
-    await fetch(mediaUrl, {
-        method: 'GET',
-        headers: new Headers({
-            "User-Agent": "PostmanRuntime/7.36.3"
-        }),
-        credentials: 'omit'
-    }).then((response) => response.json()).then((json) => {
-        JSON = json;
+    await fetch(mediaUrl).then((response) => response.json()).then((json) => {
+        data = json;
     });
 
-    return JSON;
+    return data;
 }
 
-async function FreePuzzle_ProccessQuestions(assignemntJSON, mediaJSON){
+/* void | takes in a teacher account user and password field*/
+async function FreePuzzle_TeacherLogin(username, password) {
+    const request = {
+        username: username,
+        password: password,
+        role: 'teacher'
+    };
+
+    let edpuzzleCSRF = null;
+
+    try {
+        const cookies = await FreePuzzle_SendMessagePromise({
+            action: "getCookies",
+        });
+
+        for (const cookie in cookies) {
+            if (cookie.name == "edpuzzleCSRF") {
+                edpuzzleCSRF = cookie.value;
+                break;
+            }
+        }
+    } catch (error) {
+        console.error("Error Getting cookies: ", error);
+    }
+
+    const version = document.documentElement.innerHTML.match(/window\.__EDPUZZLE_DATA__\s*=\s*\{[^}]*\s*version\s*:\s*"([^"]+)"/)?.[1];
+
+    const csrfResponse = await fetch('https://edpuzzle.com/api/v3/csrf', {
+        method: 'GET'
+    });
+
+    const csrfData = await csrfResponse.json();
+    const csrf = csrfData.CSRFToken;
+
+    const md5Hash = md5(JSON.stringify(request)).slice(0, 4);
+    const multiplyBy = Number(version.split('.')[2]) + 10;
+    const dateIncrease = Math.floor(Date.now() / 1000) * multiplyBy;
+
+    try {
+        const response = await FreePuzzle_SendMessagePromise({
+            action: "clearCookies",
+        });
+
+        console.log(response.message);
+    } catch (error) {
+        console.error("Error clearing cookies: ", error);
+    }
+
+    const loginResponse = await fetch('https://edpuzzle.com/api/v3/users/login', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': JSON.stringify(request).length.toString(),
+            'x-chrome-version': '134',
+            'x-csrf-token': csrf,
+            'x-edpuzzle-preferred-language': 'en',
+            'x-edpuzzle-referrer': 'https://edpuzzle.com/discover',
+            'x-edpuzzle-web-version': version + '.' + md5Hash + dateIncrease
+        },
+        body: JSON.stringify(request)
+    });
+
+    if (!loginResponse.ok) {
+        console.error('Login failed:', loginResponse.status, loginResponse.statusText);
+        return;
+    }
+
+    const auth = loginResponse.headers.get('authorization')?.replace('Bearer ', '').trim() || '';
+
+    console.log('Logged in as teacher!');
+
+    if (!Authorization.startsWith('ey')) {
+        console.error('This authorization token does not appear to be valid.');
+    } else {
+        console.log('Authorization token is valid.');
+    }
+}
+
+async function FreePuzzle_ProccessQuestions(assignemntJSON, mediaJSON) {
     const htmlRegexG = /<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>/g;
     const htmlRegexGCode = /&[a-zA-Z0-9#]+;/g;
 
@@ -177,8 +319,8 @@ async function FreePuzzle_ProccessQuestions(assignemntJSON, mediaJSON){
                 type: questions[i].type,
                 answers: openEndedRes
             };
-        }else if(questions[i].type.includes("choice") || questions[i].choices !== undefined){
-            const answers = await FreePuzzle_GetChoiceAnswers(questions[i]);
+        } else if (questions[i].type.includes("choice") || questions[i].choices !== undefined) {
+            const answers = FreePuzzle_GetChoiceAnswers(questions[i]);
             proccessedQuestions[`${questions[i].body[0].html.replace(htmlRegexG, "").replace(htmlRegexGCode, "")}`] = {
                 type: questions[i].type,
                 answers: answers
@@ -190,19 +332,23 @@ async function FreePuzzle_ProccessQuestions(assignemntJSON, mediaJSON){
 }
 
 /* returns a boolean | checks if a certian element exists on the page, if so that means a question is being asked */
-function FreePuzzle_IsQuestionAsked(){
+function FreePuzzle_IsQuestionAsked() {
     return (document.getElementsByClassName("LjTjX0QjOD").length == 1);
 }
 
 /* returns a html element | ... */
-function FreePuzzle_GetMultipleChoicesChoiceHTML(sAnswer){
-    const ul = document.getElementsByClassName("S22KF9HiqC")[0];
+function FreePuzzle_GetMultipleChoicesChoiceHTML(sAnswer) {
+    const qoutesRegexG = /(")|(')/g
+    const htmlRegexG = /<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>/g;
+    const htmlRegexGCode = /&[a-zA-Z0-9#]+;/g;
+
+    const ul = FreePuzzle_GetQuestionVP().querySelector("div > section > ul");
     let choiceHTML = null;
-    for(let i = 0; i < ul.children.length; i++){
+    for (let i = 0; i < ul.children.length; i++) {
         const e = ul.children[i];
         const c = (e.getElementsByClassName("kvVVRmoyRB NVoSF83SAC hsU0UJ0TaS duNyBf_CZP QIUj5uyqT_ _8iDl0vnnei")[0]);
         const d = (e.getElementsByClassName("_AnLKA_ZU9")[0]);
-        if(c.innerText == sAnswer)
+        if (c.innerHTML.replace(htmlRegexG, "").replace(htmlRegexGCode, "").replace(qoutesRegexG, "") == sAnswer)
             choiceHTML = {
                 checkbox: d,
                 span: c
@@ -212,52 +358,124 @@ function FreePuzzle_GetMultipleChoicesChoiceHTML(sAnswer){
 }
 
 /* a handle under FreePuzzle_Worker (interval), executes every 50ms */
-async function FreePuzzle_WorkerHandle(assignemntJSON, mediaJSON, proccessedQuestions){
+async function FreePuzzle_WorkerHandle(assignemntJSON, mediaJSON, proccessedQuestions) {
+    if (!FreePuzzle_InCorrectDir()) {
+        clearInterval(FreePuzzle_worker);
+        FreePuzzle_worker = null;
+
+        if (!FreePuzzle_loaderWorker) {
+            console.log("FreePuzzle | Loading || On Standby");
+            FreePuzzle_loaderWorker = setInterval(FreePuzzle_LoaderHandle, 50);
+        }
+        return;
+    }
     const htmlRegexG = /<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>/g;
     const htmlRegexGCode = /&[a-zA-Z0-9#]+;/g;
+    const qoutesRegexG = /(")|(')/g
 
-    if(!FreePuzzle_IsQuestionAsked())
-        return;
-    const questionDiv = document.getElementsByClassName("pmbdsU36dw")[0];
-    const sQuestion = questionDiv.innerText;
-
-    const qQuestion = proccessedQuestions[sQuestion];
-    console.log(sQuestion);
-    console.log(proccessedQuestions);
-
-    if(qQuestion == undefined)
+    if (!FreePuzzle_IsQuestionAsked())
         return;
 
-    if(qQuestion.type !== "open-ended")
-    {
-        for(let i = 0; i < qQuestion.answers.length; i++)
-        {
+    const questionDiv = FreePuzzle_GetQuestionVP().querySelector("header > div > section > span > p");
+    if (questionDiv === undefined)
+        return;
+
+    const sQuestion = questionDiv.innerHTML;
+    let qQuestion = undefined;
+
+    for (const key in proccessedQuestions) {
+        if (key == sQuestion.replace(htmlRegexGCode, "").replace(qoutesRegexG, "")) {
+            qQuestion = proccessedQuestions[key];
+        }
+    }
+
+    if (qQuestion == undefined)
+        return;
+
+    if (qQuestion.type !== "open-ended") {
+        for (let i = 0; i < qQuestion.answers.length; i++) {
             const answer = qQuestion.answers[i];
             const element = FreePuzzle_GetMultipleChoicesChoiceHTML(answer.body[0].html.replace(htmlRegexG, "").replace(htmlRegexGCode, ""));
-            if(element !== undefined){
+
+            if (element !== undefined) {
                 element.checkbox.parentElement.parentElement.parentElement.style.backgroundColor = "#00FF00";
                 // click it somehow
-            }else{
+            } else {
 
             }
         }
-    }else if(qQuestion.type === "open-ended"){
-        
+    } else if (qQuestion.type === "open-ended") {
+        const answer = qQuestion.answers;
+
     }
+}
+
+let FreePuzzle_lastHref = "";
+async function FreePuzzle_LoaderHandle() {
+    const current = window.location.href;
+
+    if (current !== FreePuzzle_lastHref && FreePuzzle_lastHref !== "") {
+        FreePuzzle_lastHref = "";
+        if (FreePuzzle_loaderWorker) {
+            clearInterval(FreePuzzle_loaderWorker);
+            FreePuzzle_loaderWorker = null;
+        }
+        FreePuzzle_Initialize();
+        return;
+    }
+    FreePuzzle_lastHref = current;
 }
 
 /* this will get everything about the current assignnment */
 async function FreePuzzle_Initialize() {
     if (!FreePuzzle_InCorrectDir()) {
+        console.log("FreePuzzle | Loading || On Standby");
+        FreePuzzle_loaderWorker = setInterval(FreePuzzle_LoaderHandle, 50);
         return;
     }
+
+    await sleep(1000);
+
+    console.log("FreePuzzle | Loading || Questions");
+
     const sAssignmentId = FreePuzzle_GetAssignementId();
     const assignemntJSON = await FreePuzzle_GetAssigmentJSON(sAssignmentId);
+
+    try {
+        const response = await FreePuzzle_SendMessagePromise({
+            action: "saveCookiesCheckpoint",
+        });
+
+        console.log(response.message);
+    } catch (error) {
+        console.error("Error setting cookie checkpoint: ", error);
+    }
+
+    await FreePuzzle_TeacherLogin(FreePuzzle_TeacherEmail, FreePuzzle_TeacherPassword);
+
     const mediaJSON = await FreePuzzle_GetMediaJSON(assignemntJSON.teacherAssignments[0].contentId);
+
+    try {
+        const response = await FreePuzzle_SendMessagePromise({
+            action: "restoreCookiesCheckpoint",
+        });
+
+        console.log(response.message);
+    } catch (error) {
+        console.error("Error restoring cookie checkpoint: ", error);
+    }
 
     const proccessedQuestions = await FreePuzzle_ProccessQuestions(assignemntJSON, mediaJSON);
 
-    FreePuzzle_Worker = setInterval(FreePuzzle_WorkerHandle, 50, assignemntJSON, mediaJSON, proccessedQuestions);
+    console.log("Proccessed Questions: " + proccessedQuestions);
+
+    console.log("FreePuzzle | Initializing || Proccessed Questions");
+
+    console.log("FreePuzzle | Initializing || Running Worker..");
+
+    FreePuzzle_worker = setInterval(FreePuzzle_WorkerHandle, 50, assignemntJSON, mediaJSON, proccessedQuestions);
 }
 
+console.clear();
+console.log(FreePuzzle_ASCII);
 FreePuzzle_Initialize();

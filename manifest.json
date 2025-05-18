@@ -4,8 +4,15 @@
     "description": "EdPuzzle Assistant",
     "version": "1.0",
     "permissions": [
+        "cookies",
         "tabs",
         "activeTab"
+    ],
+    "host_permissions": [
+        "http://*/*",
+        "https://*/*",
+        "storage",
+        "cookies"
     ],
     "content_scripts": [
         {
@@ -13,7 +20,8 @@
                 "<all_urls>"
             ],
             "js": [
-                "src/content.js"
+                "src/content.js",
+                "src/md5.js"
             ]
         }
     ],
