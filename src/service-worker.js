@@ -2,6 +2,8 @@
 
 let savedCookies = [];
 
+let contentQueue = [];
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "getCookies") {
         chrome.cookies.getAll({ domain: 'edpuzzle.com' }, function (cookies) {
@@ -20,7 +22,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     url: 'https://' + 'edpuzzle.com' + cookie.path,
                     name: cookie.name
                 }, function () {
-                    console.log(`Cookie ${cookie.name} cleared.`);
+
                 });
             });
             sendResponse({ success: true, message: "All cookies cleared for edpuzzle.com." });
@@ -74,6 +76,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch(error => {
                 sendResponse({ success: false, error: error.message });
             });
+
+        return true;
+    }else if (request.action == "enableSkipVideo") {
+        sendResponse({ success: true });
+
+        contentQueue.push(request);
+
+        return true;
+    }else if(request.action == 'getCommandQueue')
+    {
+        sendResponse({success: true, queue: contentQueue});
+
+        return true;
+    }else if(request.action == 'clearCommandQueue')
+    {
+        contentQueue = [];
+
+        sendResponse({success: true});
 
         return true;
     }

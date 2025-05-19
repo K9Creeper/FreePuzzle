@@ -1,4 +1,5 @@
 const FreePuzzle_API_URL = "https://edpuzzle.com/api/v3/";
+const FreePuzzle_API2_URL = "https://edpuzzle.com/api/v4/";
 
 const FreePuzzle_ASCII = `
  __                                      _      
@@ -11,8 +12,8 @@ const FreePuzzle_ASCII = `
                     |_|                                               
 `;
 
-const FreePuzzle_TeacherEmail = "email@deez.com";
-const FreePuzzle_TeacherPassword = "passondeez";
+const FreePuzzle_TeacherEmail = "k9creeper20@gmail.com";
+const FreePuzzle_TeacherPassword = "ljRCo\\U=R6\\#0oe5";
 
 let FreePuzzle_worker = null;
 let FreePuzzle_loaderWorker = null;
@@ -60,10 +61,12 @@ let FreePuzzle_loaderWorker = null;
 }
 */
 
+/* void | just a sleep function */
 function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/* void | contact the orther .js */
 function FreePuzzle_SendMessagePromise(message) {
     return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage(message, (response) => {
@@ -76,6 +79,21 @@ function FreePuzzle_SendMessagePromise(message) {
     });
 }
 
+/* returns a string | gets the edpuzzle client version */
+function FreePuzzle_GetClientVersion() {
+    return document.documentElement.innerHTML.match(/window\.__EDPUZZLE_DATA__\s*=\s*\{[^}]*\s*version\s*:\s*"([^"]+)"/)?.[1];
+}
+
+/* returns a string | gets a valid CSRF token */
+async function FreePuzzle_GetCSRFToken() {
+    const csrfResponse = await fetch('https://edpuzzle.com/api/v3/csrf', {
+        method: 'GET'
+    });
+
+    const csrfData = await csrfResponse.json();
+    return csrfData.CSRFToken;
+}
+
 /* returns a string | it is the assignment id based off of the current page */
 function FreePuzzle_GetAssignementId() {
     const path = window.location.pathname;
@@ -85,6 +103,11 @@ function FreePuzzle_GetAssignementId() {
 /* returns a string | it is a edpuzzle api url */
 function FreePuzzle_GetAssignementIdUrl(sAssignmentId) {
     return `${FreePuzzle_API_URL}assignments/${sAssignmentId}`;
+}
+
+/* returns a string | it is a edpuzzle api url */
+function FreePuzzle_GetAttemptUrl(sAssignmentId) {
+    return FreePuzzle_GetAssignementIdUrl(sAssignmentId) + "/attempt";
 }
 
 /* returns a string | it is a edpuzzle api url */
@@ -210,6 +233,21 @@ async function FreePuzzle_GetAssigmentJSON(sAssignmentId) {
     return JSON;
 }
 
+/* returns a json structure | takes in an assignment id */
+async function FreePuzzle_GetAttemptJSON(sAssignmentId) {
+    const url = FreePuzzle_GetAttemptUrl(sAssignmentId);
+
+    /* pre-define a holder for the json */
+    let JSON = null;
+
+    /* await so the pre-define is set & fetch */
+    await fetch(url).then((response) => response.json()).then((json) => {
+        JSON = json;
+    });
+
+    return JSON;
+}
+
 /* returns a json structure | takes in an id */
 async function FreePuzzle_GetMediaJSON(contentId) {
     /* the url to fetch */
@@ -234,31 +272,9 @@ async function FreePuzzle_TeacherLogin(username, password) {
         role: 'teacher'
     };
 
-    let edpuzzleCSRF = null;
+    const version = FreePuzzle_GetClientVersion();
 
-    try {
-        const cookies = await FreePuzzle_SendMessagePromise({
-            action: "getCookies",
-        });
-
-        for (const cookie in cookies) {
-            if (cookie.name == "edpuzzleCSRF") {
-                edpuzzleCSRF = cookie.value;
-                break;
-            }
-        }
-    } catch (error) {
-        console.error("Error Getting cookies: ", error);
-    }
-
-    const version = document.documentElement.innerHTML.match(/window\.__EDPUZZLE_DATA__\s*=\s*\{[^}]*\s*version\s*:\s*"([^"]+)"/)?.[1];
-
-    const csrfResponse = await fetch('https://edpuzzle.com/api/v3/csrf', {
-        method: 'GET'
-    });
-
-    const csrfData = await csrfResponse.json();
-    const csrf = csrfData.CSRFToken;
+    const csrf = await FreePuzzle_GetCSRFToken();
 
     const md5Hash = md5(JSON.stringify(request)).slice(0, 4);
     const multiplyBy = Number(version.split('.')[2]) + 10;
@@ -333,28 +349,37 @@ async function FreePuzzle_ProccessQuestions(assignemntJSON, mediaJSON) {
 
 /* returns a boolean | checks if a certian element exists on the page, if so that means a question is being asked */
 function FreePuzzle_IsQuestionAsked() {
-    return (document.getElementsByClassName("LjTjX0QjOD").length == 1);
+    return (document.getElementsByClassName("LjTjX0QjOD").length == 1) && FreePuzzle_GetQuestionVP().querySelector("header > div > section > span > p");
 }
 
 /* returns a html element | ... */
-function FreePuzzle_GetMultipleChoicesChoiceHTML(sAnswer) {
-    const qoutesRegexG = /(")|(')/g
-    const htmlRegexG = /<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>/g;
-    const htmlRegexGCode = /&[a-zA-Z0-9#]+;/g;
+function FreePuzzle_GetMultipleChoicesChoiceHTML(answer) {
+    return document.getElementById(answer._id);
+}
 
-    const ul = FreePuzzle_GetQuestionVP().querySelector("div > section > ul");
-    let choiceHTML = null;
-    for (let i = 0; i < ul.children.length; i++) {
-        const e = ul.children[i];
-        const c = (e.getElementsByClassName("kvVVRmoyRB NVoSF83SAC hsU0UJ0TaS duNyBf_CZP QIUj5uyqT_ _8iDl0vnnei")[0]);
-        const d = (e.getElementsByClassName("_AnLKA_ZU9")[0]);
-        if (c.innerHTML.replace(htmlRegexG, "").replace(htmlRegexGCode, "").replace(qoutesRegexG, "") == sAnswer)
-            choiceHTML = {
-                checkbox: d,
-                span: c
-            };
-    }
-    return choiceHTML;
+/* void | sends a request to allow the user to skip through the video */
+async function FreePuzzle_SkipVideo(id) {
+    const url = FreePuzzle_API2_URL + "media_attempts/" + id + "/watch";
+
+    const data = {
+        "timeIntervalNumber": 10
+    };
+
+    const version = FreePuzzle_GetClientVersion();
+    const csrf = await FreePuzzle_GetCSRFToken();
+
+    await fetch(url, {
+        method: "POST",
+        headers: {
+            'accept': 'application/json, text/plain, */*',
+            'accept_language': 'en-US,en;q=0.9',
+            'content-type': 'application/json',
+            'x-csrf-token': csrf,
+            'x-edpuzzle-referrer': "https://edpuzzle.com/assignments/" + id + "/watch",
+            "x-edpuzzle-web-version": version
+        },
+        body: JSON.stringify(data)
+    });
 }
 
 /* a handle under FreePuzzle_Worker (interval), executes every 50ms */
@@ -372,6 +397,20 @@ async function FreePuzzle_WorkerHandle(assignemntJSON, mediaJSON, proccessedQues
     const htmlRegexG = /<(?:"[^"]*"['"]*|'[^']*'['"]*|[^'">])+>/g;
     const htmlRegexGCode = /&[a-zA-Z0-9#]+;/g;
     const qoutesRegexG = /(")|(')/g
+
+    const queue = await FreePuzzle_SendMessagePromise({ action: "getCommandQueue" });
+    await FreePuzzle_SendMessagePromise({ action: "clearCommandQueue" });
+
+    for (const message of queue.queue) {
+        if (message.action == "enableSkipVideo") {
+            const sAssignmentId = FreePuzzle_GetAssignementId();
+            const attemptJSON = await FreePuzzle_GetAttemptJSON(sAssignmentId);
+
+            await FreePuzzle_SkipVideo(attemptJSON._id);
+
+            location.reload(true);
+        }
+    }
 
     if (!FreePuzzle_IsQuestionAsked())
         return;
@@ -395,16 +434,13 @@ async function FreePuzzle_WorkerHandle(assignemntJSON, mediaJSON, proccessedQues
     if (qQuestion.type !== "open-ended") {
         for (let i = 0; i < qQuestion.answers.length; i++) {
             const answer = qQuestion.answers[i];
-            const element = FreePuzzle_GetMultipleChoicesChoiceHTML(answer.body[0].html.replace(htmlRegexG, "").replace(htmlRegexGCode, ""));
+            const element = FreePuzzle_GetMultipleChoicesChoiceHTML(answer);
 
             if (element !== undefined) {
-                element.checkbox.parentElement.parentElement.parentElement.style.backgroundColor = "#00FF00";
-                // click it somehow
-            } else {
-
+                element.parentElement.parentElement.parentElement.style.backgroundColor = "#00FF00";
             }
         }
-    } else if (qQuestion.type === "open-ended") {
+    } else {
         const answer = qQuestion.answers;
 
     }
@@ -433,6 +469,12 @@ async function FreePuzzle_Initialize() {
         FreePuzzle_loaderWorker = setInterval(FreePuzzle_LoaderHandle, 50);
         return;
     }
+    await FreePuzzle_SendMessagePromise({ action: "clearCommandQueue" });
+
+    /* LOL GET REBRANEDED LOSER */
+
+    console.clear();
+    console.log(FreePuzzle_ASCII);
 
     await sleep(1000);
 
@@ -467,8 +509,6 @@ async function FreePuzzle_Initialize() {
 
     const proccessedQuestions = await FreePuzzle_ProccessQuestions(assignemntJSON, mediaJSON);
 
-    console.log("Proccessed Questions: " + proccessedQuestions);
-
     console.log("FreePuzzle | Initializing || Proccessed Questions");
 
     console.log("FreePuzzle | Initializing || Running Worker..");
@@ -476,6 +516,4 @@ async function FreePuzzle_Initialize() {
     FreePuzzle_worker = setInterval(FreePuzzle_WorkerHandle, 50, assignemntJSON, mediaJSON, proccessedQuestions);
 }
 
-console.clear();
-console.log(FreePuzzle_ASCII);
 FreePuzzle_Initialize();
